@@ -39,6 +39,7 @@ def main(args):
         tx_dim = args.tx_dim,
         tx_depth = args.tx_depth,
         heads = args.tx_dim//ATTN_HEAD_DIM,
+        use_lora=args.use_diffusion_lora,
         latent_dim = latent_dim,
         max_seq_len = args.max_seq_len,
         self_condition = args.self_condition,
@@ -52,7 +53,15 @@ def main(args):
         num_dense_connections=args.num_dense_connections,
     ).cuda()
 
+    if args.use_diffusion_lora:
+        for name, param in model.named_parameters():
+            param.requires_grad = False
+            if "lora_" in name:
+                param.requires_grad = True
+                print(f"[LoRA] Trainable: {name}")
+
     args.trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    print(f"Number of trainable parameters: {args.trainable_params:,}")
 
     diffusion = GaussianDiffusion(
         model,
@@ -199,6 +208,17 @@ if __name__ == "__main__":
         help=(
             "Which noise schedule to use."
         ),
+    )
+    # lora arguments
+    parser.add_argument(
+        "--use_diffusion_lora",
+        action="store_true",
+        help="Enable LoRA fine-tuning. If specified, only LoRA parameters will be trained."
+    )
+    parser.add_argument(
+        "--use_encoder_lora",
+        action="store_true",
+        help="Enable LoRA fine-tuning. If specified, only LoRA parameters will be trained."
     )
     # Model hyperparemeters
     parser.add_argument("--enc_dec_model", type=str, default="facebook/bart-base")

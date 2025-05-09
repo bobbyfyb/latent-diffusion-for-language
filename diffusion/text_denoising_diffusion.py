@@ -625,6 +625,13 @@ class Trainer(object):
         
 
         self.diffusion = diffusion
+        # LoRA-Diffusion: freeze all params except LoRA adapters if enabled
+        if getattr(args, "use_diffusion_lora", False):
+            for name, param in self.diffusion.named_parameters():
+                param.requires_grad = False
+                if "lora_" in name:
+                    param.requires_grad = True
+                    print(f"[LoRA-Diffusion] Trainable: {name}")
         self.decoding_loss = decoding_loss
         self.decoding_loss_weight = decoding_loss_weight
 
@@ -679,6 +686,17 @@ class Trainer(object):
             self.bart_model, self.tokenizer, _ = get_latent_model(latent_argparse)
             data = torch.load(os.path.join(args.latent_model_path, 'model.pt'), map_location=device)
             self.bart_model.load_state_dict(data['model'])
+            # LoRA: Disable adapter if present for clean latent representation
+            try:
+                from peft import PeftModel
+                if isinstance(self.bart_model, PeftModel):
+                    if not getattr(args, "use_encoder_lora", False):
+                        self.bart_model.disable_adapter()
+                        print("[Info] LoRA adapter in encoder disabled for clean latent representation.")
+                    else:
+                        print("[Info] LoRA adapter in encoder ENABLED.")
+            except ImportError:
+                pass
             self.diffusion.max_seq_len = self.bart_model.num_encoder_latents
             self.num_encoder_latents = self.bart_model.num_encoder_latents
             self.diffusion.using_latent_model = True
@@ -756,6 +774,10 @@ class Trainer(object):
         self.val_iter = cycle(self.val_dataloader)
         self.reference_dict = {}
 
+        # LoRA-Diffusion: print trainable param count if enabled
+        args.trainable_params = sum(p.numel() for p in self.diffusion.parameters() if p.requires_grad)
+        print(f"Trainable params (diffusion): {args.trainable_params:,}")
+
     def save(self, best=False):
         if not self.accelerator.is_local_main_process:
             return
@@ -772,6 +794,10 @@ class Trainer(object):
             torch.save(data, str(self.results_folder / f'best_model.pt'))
         else:
             torch.save(data, str(self.results_folder / f'model.pt'))
+        # LoRA-Diffusion: save LoRA adapter if enabled
+        if getattr(self.args, "use_diffusion_lora", False):
+            self.diffusion.diffusion_model.save_pretrained(self.results_folder / "lora_adapter")
+            self.accelerator.print("[LoRA] Diffusion adapter saved.")
 
     def load(self, file_path=None, best=False, init_only=False):
         file_path = Path(file_path) if exists(file_path) else self.results_folder

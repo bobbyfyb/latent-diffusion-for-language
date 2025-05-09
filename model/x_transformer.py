@@ -7,6 +7,9 @@ from functools import partial, wraps
 from inspect import isfunction
 from collections import namedtuple
 
+# LoRA import
+from peft.tuners.lora import LoraLayer
+
 from einops import rearrange, repeat, reduce
 from einops.layers.torch import Rearrange
 
@@ -541,7 +544,8 @@ class Attention(nn.Module):
         one_kv_head = False,
         shared_kv = False,
         value_dim_head = None,
-        tensor_product = False   # https://arxiv.org/abs/2208.06061
+        tensor_product = False,   # https://arxiv.org/abs/2208.06061
+        use_lora = False
     ):
         super().__init__()
         self.scale = dim_head ** -0.5
@@ -569,6 +573,17 @@ class Attention(nn.Module):
 
         # relations projection from tp-attention
         self.to_r = nn.Linear(dim, v_dim, bias = False) if tensor_product else None
+
+        # LoRA logic
+        self.use_lora = use_lora
+        if hasattr(self, 'use_lora') and self.use_lora:
+            self.to_q = LoraLayer.wrap(self.to_q, r=4, lora_alpha=16)
+            self.to_v = LoraLayer.wrap(self.to_v, r=4, lora_alpha=16)
+            self.to_out = LoraLayer.wrap(
+                nn.Linear(out_dim, dim * 2, bias=False), r=4, lora_alpha=16
+            ) if on_attn else LoraLayer.wrap(
+                nn.Linear(out_dim, dim, bias=False), r=4, lora_alpha=16
+            )
 
         # dropout
         self.dropout = nn.Dropout(dropout)
@@ -831,6 +846,7 @@ class AttentionLayers(nn.Module):
         zero_init_branch_output = False,
         time_emb_dim = None,
         num_dense_connections = 0,
+        use_lora = False,
         **kwargs
     ):
         super().__init__()
@@ -843,6 +859,7 @@ class AttentionLayers(nn.Module):
         self.depth = depth
         self.layers = nn.ModuleList([])
         self.num_dense_connections = num_dense_connections
+        self.use_lora = use_lora
 
         self.has_pos_emb = position_infused_attn or rel_pos_bias or rotary_pos_emb
         self.pia_pos_emb = FixedPositionalEmbedding(dim) if position_infused_attn else None
@@ -939,9 +956,9 @@ class AttentionLayers(nn.Module):
             is_last_layer = ind == (len(self.layer_types) - 1)
 
             if layer_type == 'a':
-                layer = Attention(dim, heads = heads, causal = causal, **attn_kwargs)
+                layer = Attention(dim, heads = heads, causal = causal, use_lora=self.use_lora, **attn_kwargs)
             elif layer_type == 'c':
-                layer = Attention(dim, heads = heads, **attn_kwargs)
+                layer = Attention(dim, heads = heads, use_lora=self.use_lora, **attn_kwargs)
             elif layer_type == 'f':
                 layer = FeedForward(dim, **ff_kwargs)
                 layer = layer if not macaron else Scale(0.5, layer)

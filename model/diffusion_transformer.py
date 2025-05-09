@@ -19,6 +19,7 @@ from einops import rearrange, reduce, repeat
 from einops.layers.torch import Rearrange
 
 from model.x_transformer import AbsolutePositionalEmbedding, Encoder
+from peft.tuners.lora import LoraLayer
 
 
 # Helper Functions
@@ -98,6 +99,7 @@ class DiffusionTransformer(nn.Module):
         tx_dim,
         tx_depth,
         heads,
+        use_lora=False,
         latent_dim = None,
         max_seq_len=64,
         self_condition = False,
@@ -113,6 +115,10 @@ class DiffusionTransformer(nn.Module):
         dense_output_connection=False,
     ):
         super().__init__()
+
+        self.use_lora = use_lora  # You can later change this to be a constructor argument if needed
+        self.lora_r = 4
+        self.lora_alpha = 16
 
         self.latent_dim = latent_dim
 
@@ -152,6 +158,7 @@ class DiffusionTransformer(nn.Module):
             dim=tx_dim,
             depth=tx_depth,
             heads=heads,
+            use_lora=use_lora,
             attn_dropout = dropout,    # dropout post-attention
             ff_dropout = dropout,       # feedforward dropout
             rel_pos_bias=False,
@@ -170,12 +177,18 @@ class DiffusionTransformer(nn.Module):
         
         if self.self_condition:
             self.input_proj = nn.Linear(latent_dim*2, tx_dim)
+            if self.use_lora:
+                self.input_proj = LoraLayer.wrap(self.input_proj, r=self.lora_r, lora_alpha=self.lora_alpha)
             self.init_self_cond = nn.Parameter(torch.randn(1, latent_dim))
             nn.init.normal_(self.init_self_cond, std = 0.02)
         else:
             self.input_proj = nn.Linear(latent_dim, tx_dim)
+            if self.use_lora:
+                self.input_proj = LoraLayer.wrap(self.input_proj, r=self.lora_r, lora_alpha=self.lora_alpha)
         self.norm = nn.LayerNorm(tx_dim)
         self.output_proj = nn.Linear(tx_dim*2 if dense_output_connection else tx_dim, latent_dim*2 if dual_output else latent_dim)
+        if self.use_lora:
+            self.output_proj = LoraLayer.wrap(self.output_proj, r=self.lora_r, lora_alpha=self.lora_alpha)
 
         init_zero_(self.output_proj)
 
