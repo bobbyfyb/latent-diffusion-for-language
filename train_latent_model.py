@@ -86,6 +86,11 @@ if __name__ == "__main__":
             "How to fine-tune LM."
         ),
     )
+    parser.add_argument(
+        "--use_lora",
+        action="store_true",
+        help="Enable LoRA fine-tuning. If specified, only LoRA parameters will be trained."
+    )
     parser.add_argument("--eval", action="store_true")
     parser.add_argument("--resume_training", action="store_true", default=False)
     parser.add_argument("--resume_dir", type=str, default=None)
@@ -96,7 +101,7 @@ if __name__ == "__main__":
         with open(os.path.join(args.resume_dir, 'args.json'), 'rt') as f:
             saved_args = json.load(f)
         args_dict = vars(args)
-        heldout_params = {'wandb_name', 'output_dir', 'resume_dir', 'eval'}
+        heldout_params = {'wandb_name', 'output_dir', 'resume_dir', 'eval', 'use_lora'}
         for k,v in saved_args.items():
             if k in heldout_params:
                 continue

@@ -2,7 +2,7 @@ import re
 from transformers import AutoTokenizer, PreTrainedTokenizerBase, T5ForConditionalGeneration, AutoModelForCausalLM, MBartTokenizerFast, MT5ForConditionalGeneration
 from transformers.models.bart.modeling_bart import BartForConditionalGeneration
 from transformers.models.mbart.modeling_mbart import MBartForConditionalGeneration
-
+from peft import get_peft_model, LoraConfig, TaskType
 import CONSTANTS as CONSTANTS
 
 from latent_models.bart_latent_model import BARTForConditionalGenerationLatent
@@ -36,21 +36,38 @@ def get_latent_model(args):
     else:
         print("Unsupported model")
         raise NotImplementedError
-    
-    if args.lm_mode == 'ft':
-        for (param_name, param) in lm.named_parameters():
+
+    # Freeze all parameters initially
+    for name, param in lm.named_parameters():
+        param.requires_grad = False
+
+    if getattr(args, 'use_lora', False):
+        # Only train LoRA parameters
+        lora_config = LoraConfig(
+            r=8,
+            lora_alpha=16,
+            target_modules=["q_proj", "v_proj"],
+            lora_dropout=0.1,
+            bias="none",
+            task_type=TaskType.SEQ_2_SEQ_LM
+        )
+        lm = get_peft_model(lm, lora_config)
+        for name, param in lm.named_parameters():
+            if 'lora_' in name:
+                param.requires_grad = True
+                print(f"[LoRA] Trainable: {name}")
+        print("LoRA has been applied to the encoder-decoder model.")
+    elif args.lm_mode == 'ft':
+        # Full fine-tuning
+        for name, param in lm.named_parameters():
             param.requires_grad = True
     elif args.lm_mode == 'freeze':
-        for (param_name, param) in lm.named_parameters():
-            if re.fullmatch(".*perceiver.*", param_name):
+        # Only train perceiver module
+        for name, param in lm.named_parameters():
+            if re.fullmatch(".*perceiver.*", name):
                 param.requires_grad = True
-                print(f"Trainable: {param_name}")
-            else:
-                param.requires_grad = False
+                print(f"[Freeze Mode] Trainable: {name}")
     else:
         raise NotImplementedError
-        
 
-
-        
     return lm, tokenizer, config

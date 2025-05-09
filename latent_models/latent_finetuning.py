@@ -316,7 +316,7 @@ class Trainer(object):
         accelerator = self.accelerator
         device = accelerator.device
         self.lm.train()
-        if self.args.lm_mode == 'freeze':
+        if self.args.lm_mode == 'freeze' and not getattr(self.args, 'use_lora', False):
             encoder_context = torch.no_grad()
         else:
             encoder_context = nullcontext()
@@ -374,12 +374,12 @@ class Trainer(object):
                             encoder_outputs = self.lm.get_encoder()(input_ids = data['input_ids'], attention_mask = data['attention_mask'])
                             encoder_outputs = self.lm.encoder_output_to_decoder_input(encoder_outputs, data['attention_mask'])
                         loss = self.lm(labels=data['labels'], encoder_outputs=encoder_outputs).loss                      
-                        if self.args.lm_mode == 'freeze':
+                        if self.args.lm_mode == 'freeze' and not getattr(self.args, 'use_lora', False):
                             total_lm_val_loss += self.lm(input_ids = data['input_ids'], attention_mask = data['attention_mask'], labels=data['labels']).loss.item()
                         total_val_loss += loss.item()
 
                         logs = {"train/loss": total_loss, "val/loss": total_val_loss, "grad_norm": grad_norm, "lr": self.lr_scheduler.get_last_lr()[0], "step": self.step, "epoch": (self.step)/len(self.dataloader), "samples": self.step*self.train_batch_size*self.num_devices}
-                        if self.args.lm_mode == 'freeze':
+                        if self.args.lm_mode == 'freeze' and not getattr(self.args, 'use_lora', False):
                             logs["val/lm_loss"] = total_lm_val_loss
                         pbar.set_postfix(**logs)
                             
