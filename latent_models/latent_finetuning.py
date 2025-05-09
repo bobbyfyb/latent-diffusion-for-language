@@ -205,6 +205,12 @@ class Trainer(object):
 
         torch.save(data, str(self.results_folder / f'model.pt'))
 
+        # Save LoRA adapter if used
+        if getattr(self.args, "use_encoder_lora", False):
+            from peft import get_peft_model_state_dict
+            self.lm.save_pretrained(os.path.join(self.results_folder, "lora_adapter"))
+            self.accelerator.print("LoRA adapter saved.")
+
     def load(self, file_path=None, resume_training=False):
         file_path = Path(file_path) if exists(file_path) else self.results_folder
         accelerator = self.accelerator
@@ -316,7 +322,7 @@ class Trainer(object):
         accelerator = self.accelerator
         device = accelerator.device
         self.lm.train()
-        if self.args.lm_mode == 'freeze' and not getattr(self.args, 'use_lora', False):
+        if self.args.lm_mode == 'freeze' and not getattr(self.args, 'use_encoder_lora', False):
             encoder_context = torch.no_grad()
         else:
             encoder_context = nullcontext()
@@ -345,6 +351,13 @@ class Trainer(object):
 
                 self.accelerator.backward(loss)
 
+                # Log LoRA parameter gradient statistics if use_encoder_lora is enabled
+                lora_grad_logs = {}
+                if getattr(self.args, "use_encoder_lora", False) and self.step % 500 == 0:
+                    for name, param in self.lm.named_parameters():
+                        if 'lora_' in name and param.grad is not None:
+                            grad_mean = param.grad.mean().item()
+                            lora_grad_logs[f"lora/grad_mean/{name}"] = grad_mean
 
                 accelerator.wait_for_everyone()
 
@@ -374,18 +387,22 @@ class Trainer(object):
                             encoder_outputs = self.lm.get_encoder()(input_ids = data['input_ids'], attention_mask = data['attention_mask'])
                             encoder_outputs = self.lm.encoder_output_to_decoder_input(encoder_outputs, data['attention_mask'])
                         loss = self.lm(labels=data['labels'], encoder_outputs=encoder_outputs).loss                      
-                        if self.args.lm_mode == 'freeze' and not getattr(self.args, 'use_lora', False):
+                        if self.args.lm_mode == 'freeze' and not getattr(self.args, 'use_encoder_lora', False):
                             total_lm_val_loss += self.lm(input_ids = data['input_ids'], attention_mask = data['attention_mask'], labels=data['labels']).loss.item()
                         total_val_loss += loss.item()
 
                         logs = {"train/loss": total_loss, "val/loss": total_val_loss, "grad_norm": grad_norm, "lr": self.lr_scheduler.get_last_lr()[0], "step": self.step, "epoch": (self.step)/len(self.dataloader), "samples": self.step*self.train_batch_size*self.num_devices}
-                        if self.args.lm_mode == 'freeze' and not getattr(self.args, 'use_lora', False):
+                        if self.args.lm_mode == 'freeze' and not getattr(self.args, 'use_encoder_lora', False):
                             logs["val/lm_loss"] = total_lm_val_loss
+                        # Add LoRA grad logs if present
+                        logs.update(lora_grad_logs)
                         pbar.set_postfix(**logs)
                             
                     self.lm.train()
                 else:
                     logs = {"train/loss": total_loss, "grad_norm": grad_norm, "lr": self.lr_scheduler.get_last_lr()[0], "step": self.step, "epoch": (self.step)/len(self.dataloader), "samples": self.step*self.train_batch_size*self.num_devices}
+                    # Add LoRA grad logs if present
+                    logs.update(lora_grad_logs)
 
                 if accelerator.is_main_process:
                     accelerator.log(logs, step=self.step)

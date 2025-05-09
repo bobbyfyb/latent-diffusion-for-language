@@ -12,6 +12,9 @@ from latent_models.latent_finetuning import Trainer
 
 import argparse
 
+if '--use_encoder_lora' in sys.argv:
+    from peft import get_peft_model_state_dict
+
 def main(args):
     
     trainer = Trainer(
@@ -29,6 +32,13 @@ def main(args):
         results_folder = args.output_dir,
         mixed_precision=args.mixed_precision,
     )
+
+    if args.use_encoder_lora:
+        print("🔧 Training in LoRA mode.")
+    elif args.lm_mode == "freeze":
+        print("🧊 Training in 'freeze' mode (perceiver only).")
+    elif args.lm_mode == "ft":
+        print("🔥 Full fine-tuning.")
 
     if args.resume_dir:
         trainer.load(args.resume_dir, resume_training=args.resume_training)
@@ -87,7 +97,7 @@ if __name__ == "__main__":
         ),
     )
     parser.add_argument(
-        "--use_lora",
+        "--use_encoder_lora",
         action="store_true",
         help="Enable LoRA fine-tuning. If specified, only LoRA parameters will be trained."
     )
@@ -101,7 +111,7 @@ if __name__ == "__main__":
         with open(os.path.join(args.resume_dir, 'args.json'), 'rt') as f:
             saved_args = json.load(f)
         args_dict = vars(args)
-        heldout_params = {'wandb_name', 'output_dir', 'resume_dir', 'eval', 'use_lora'}
+        heldout_params = {'wandb_name', 'output_dir', 'resume_dir', 'eval', 'use_encoder_lora'}
         for k,v in saved_args.items():
             if k in heldout_params:
                 continue

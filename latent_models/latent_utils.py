@@ -41,7 +41,7 @@ def get_latent_model(args):
     for name, param in lm.named_parameters():
         param.requires_grad = False
 
-    if getattr(args, 'use_lora', False):
+    if getattr(args, 'use_encoder_lora', False):
         # Only train LoRA parameters
         lora_config = LoraConfig(
             r=8,
