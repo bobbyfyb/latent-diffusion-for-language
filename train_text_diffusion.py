@@ -53,15 +53,15 @@ def main(args):
         num_dense_connections=args.num_dense_connections,
     ).cuda()
 
-    if args.use_diffusion_lora:
-        for name, param in model.named_parameters():
-            param.requires_grad = False
-            if "lora_" in name:
-                param.requires_grad = True
-                print(f"[LoRA] Trainable: {name}")
+    # if args.use_diffusion_lora:
+    #     for name, param in model.named_parameters():
+    #         param.requires_grad = False
+    #         if "lora_" in name:
+    #             param.requires_grad = True
+    #             print(f"[LoRA] Trainable: {name}")
 
-    args.trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    print(f"Number of trainable parameters: {args.trainable_params:,}")
+    # args.trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    # print(f"Number of trainable parameters: {args.trainable_params:,}")
 
     diffusion = GaussianDiffusion(
         model,
@@ -216,9 +216,21 @@ if __name__ == "__main__":
         help="Enable LoRA fine-tuning. If specified, only LoRA parameters will be trained."
     )
     parser.add_argument(
+        "--diffusion_lora_path",
+        type=str,
+        default=None,
+        help="Path to encoder LoRA adapter to load during initialization or resume."
+    )
+    parser.add_argument(
         "--use_encoder_lora",
         action="store_true",
         help="Enable LoRA fine-tuning. If specified, only LoRA parameters will be trained."
+    )
+    parser.add_argument(
+        "--encoder_lora_path",
+        type=str,
+        default=None,
+        help="Path to encoder LoRA adapter to load during initialization or resume."
     )
     # Model hyperparemeters
     parser.add_argument("--enc_dec_model", type=str, default="facebook/bart-base")

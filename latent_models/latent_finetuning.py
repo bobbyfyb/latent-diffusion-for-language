@@ -135,6 +135,11 @@ class Trainer(object):
         self.enc_dec_model = args.enc_dec_model
 
         self.lm, self.tokenizer, config = get_latent_model(args)
+        # Load LoRA encoder adapter if specified and not resuming training
+        if getattr(args, "encoder_lora_path", None) and not getattr(args, "resume_training", False):
+            from peft import PeftModel
+            self.lm = PeftModel.from_pretrained(self.lm, args.encoder_lora_path)
+            print(f"[Info] Loaded encoder LoRA adapter from {args.encoder_lora_path} (init)")
         num_trainable_params = sum(p.numel() for p in self.lm.parameters() if p.requires_grad)
         if self.accelerator.is_main_process:
             self.accelerator.print(f'num trainable params: {num_trainable_params}')
@@ -220,6 +225,11 @@ class Trainer(object):
 
         model = self.accelerator.unwrap_model(self.lm)
         model.load_state_dict(data['model'])
+        # Reload LoRA adapter after loading weights if specified
+        if getattr(self.args, "encoder_lora_path", None):
+            from peft import PeftModel
+            self.lm = PeftModel.from_pretrained(self.lm, self.args.encoder_lora_path)
+            self.accelerator.print(f"[Info] Reloaded encoder LoRA adapter from {self.args.encoder_lora_path} (resume)")
 
         self.step = data['step']
         self.opt.load_state_dict(data['opt'])

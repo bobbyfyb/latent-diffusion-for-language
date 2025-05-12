@@ -24,6 +24,7 @@ dependencies:
   - zlib=1.2.12=h5eee18b_3
   - pip
   - pip:
+    - peft
     - absl-py==1.2.0
     - accelerate==0.21.0
     - aiohttp==3.8.3

@@ -625,9 +625,19 @@ class Trainer(object):
         
 
         self.diffusion = diffusion
-        # LoRA-Diffusion: freeze all params except LoRA adapters if enabled
+            
+        # Load pretrained base diffusion model weights before training LoRA adapter
         if getattr(args, "use_diffusion_lora", False):
-            for name, param in self.diffusion.named_parameters():
+            base_model_ckpt = f"{Path(args.diffusion_lora_path)} / model.pt"
+            if base_model_ckpt.exists():
+                self.load(base_model_ckpt, init_only=True)
+                
+                print(f"[LoRA] Loaded base model weights from {base_model_ckpt}")
+            
+            else:
+                print(f"[Warning] Base model checkpoint not found at {base_model_ckpt}, training will proceed from scratch.")
+        # LoRA-Diffusion: freeze all params except LoRA adapters if enabled
+            for name, param in self.diffusion.diffusion_model.named_parameters():
                 param.requires_grad = False
                 if "lora_" in name:
                     param.requires_grad = True
@@ -682,21 +692,26 @@ class Trainer(object):
                 for param in self.diffusion.context_encoder.parameters():
                     param.requires_grad = False
 
+            from peft import PeftModel
+
             self.context_tokenizer = self.tokenizer
             self.bart_model, self.tokenizer, _ = get_latent_model(latent_argparse)
             data = torch.load(os.path.join(args.latent_model_path, 'model.pt'), map_location=device)
-            self.bart_model.load_state_dict(data['model'])
-            # LoRA: Disable adapter if present for clean latent representation
-            try:
-                from peft import PeftModel
-                if isinstance(self.bart_model, PeftModel):
-                    if not getattr(args, "use_encoder_lora", False):
-                        self.bart_model.disable_adapter()
-                        print("[Info] LoRA adapter in encoder disabled for clean latent representation.")
-                    else:
-                        print("[Info] LoRA adapter in encoder ENABLED.")
-            except ImportError:
-                pass
+
+            is_peft_model = isinstance(self.bart_model, PeftModel)
+            self.bart_model.load_state_dict(data['model'], strict=not is_peft_model)
+            print(f"[Info] Loaded model weights into {'PeftModel (strict=False)' if is_peft_model else 'standard encoder'}.")
+
+            if getattr(args, "encoder_lora_path", None):
+                self.bart_model = PeftModel.from_pretrained(self.bart_model, args.encoder_lora_path)
+                print(f"[Info] Loaded encoder LoRA adapter from {args.encoder_lora_path}")
+
+            if isinstance(self.bart_model, PeftModel):
+                if not getattr(args, "use_encoder_lora", False):
+                    self.bart_model.disable_adapter()
+                    print("[Info] LoRA adapter in encoder disabled for clean latent representation.")
+                else:
+                    print("[Info] LoRA adapter in encoder ENABLED.")
             self.diffusion.max_seq_len = self.bart_model.num_encoder_latents
             self.num_encoder_latents = self.bart_model.num_encoder_latents
             self.diffusion.using_latent_model = True
@@ -781,23 +796,24 @@ class Trainer(object):
     def save(self, best=False):
         if not self.accelerator.is_local_main_process:
             return
-
-        data = {
-            'step': self.step,
-            'model': self.accelerator.get_state_dict(self.diffusion),
-            'opt': self.opt.state_dict(),
-            'ema': self.ema.state_dict(),
-            'scaler': self.accelerator.scaler.state_dict() if exists(self.accelerator.scaler) else None,
-            'scheduler': self.lr_scheduler.state_dict(),
-        }
-        if best:
-            torch.save(data, str(self.results_folder / f'best_model.pt'))
-        else:
-            torch.save(data, str(self.results_folder / f'model.pt'))
         # LoRA-Diffusion: save LoRA adapter if enabled
-        if getattr(self.args, "use_diffusion_lora", False):
-            self.diffusion.diffusion_model.save_pretrained(self.results_folder / "lora_adapter")
-            self.accelerator.print("[LoRA] Diffusion adapter saved.")
+        # if getattr(self.args, "use_diffusion_lora", False):
+        #     self.diffusion.diffusion_model.save_pretrained(self.args.diffusion_lora_path)
+        #     self.accelerator.print("[LoRA] Diffusion adapter saved.")
+        else:
+            data = {
+                'step': self.step,
+                'model': self.accelerator.get_state_dict(self.diffusion),
+                'opt': self.opt.state_dict(),
+                'ema': self.ema.state_dict(),
+                'scaler': self.accelerator.scaler.state_dict() if exists(self.accelerator.scaler) else None,
+                'scheduler': self.lr_scheduler.state_dict(),
+            }
+            if best:
+                torch.save(data, str(self.results_folder / f'best_model.pt'))
+            else:
+                torch.save(data, str(self.results_folder / f'model.pt'))
+        
 
     def load(self, file_path=None, best=False, init_only=False):
         file_path = Path(file_path) if exists(file_path) else self.results_folder
@@ -811,7 +827,15 @@ class Trainer(object):
 
         model = self.accelerator.unwrap_model(self.diffusion)
         # For backwards compatibility with earlier models
-        model.load_state_dict(data['model'])
+        model.load_state_dict(data['model'], strict=False)
+        # LoRA-Diffusion: load LoRA adapter if enabled
+        # if getattr(self.args, "use_diffusion_lora", False):
+        #     from peft import PeftModel
+        #     lora_adapter_path = self.args.diffusion_lora_path
+        #     if lora_adapter_path.exists():
+        #         base_model = self.diffusion.diffusion_model
+        #         self.diffusion.diffusion_model = PeftModel.from_pretrained(base_model, lora_adapter_path)
+        #         self.accelerator.print(f"[LoRA] Diffusion adapter loaded from {lora_adapter_path}")
         self.opt.load_state_dict(data['opt'])
         if self.accelerator.is_local_main_process:
             self.ema.load_state_dict(data['ema'])
@@ -872,6 +896,15 @@ class Trainer(object):
         torch.cuda.empty_cache() 
 
         self.ema.ema_model.eval()
+        # LoRA-Diffusion: ensure LoRA adapter loaded for inference if needed
+        # if getattr(self.args, "use_diffusion_lora", False):
+        #     from peft import PeftModel
+        #     if not isinstance(self.ema.ema_model.diffusion_model, PeftModel):
+        #         lora_adapter_path = self.args.diffusion_lora_path
+        #         if lora_adapter_path.exists():
+        #             base_model = self.ema.ema_model.diffusion_model
+        #             self.ema.ema_model.diffusion_model = PeftModel.from_pretrained(base_model, lora_adapter_path, is_trainable=False)
+        #             accelerator.print(f"[LoRA] Diffusion adapter loaded for inference from {lora_adapter_path}")
 
         # Extract references
         reference_texts = {}
