@@ -741,6 +741,7 @@ class Trainer(object):
 
         if self.accelerator.is_main_process:
             self.ema = EMA(diffusion, beta = ema_decay, update_every = ema_update_every, power=3/4)
+             
 
             self.results_folder = Path(results_folder)
             self.results_folder.mkdir(exist_ok = True)
@@ -772,12 +773,22 @@ class Trainer(object):
             torch.save(data, str(self.results_folder / f'best_model.pt'))
         else:
             torch.save(data, str(self.results_folder / f'model.pt'))
+        
+        # If using LoRA, also save just the adapter weights for easier transfer
+        if self.args.use_diffusion_lora:
+            self.save_lora(best=best)
 
-    def load(self, file_path=None, best=False, init_only=False):
+    def load(self, file_path=None, best=False, init_only=False, lora_only=False):
         file_path = Path(file_path) if exists(file_path) else self.results_folder
         accelerator = self.accelerator
         device = accelerator.device
 
+        # If lora_only is True, only load the LoRA weights
+        if lora_only and self.args.use_diffusion_lora:
+            self.load_lora(file_path=file_path, best=best)
+            return
+
+        # Otherwise, load the full model checkpoint
         if best:
             data = torch.load(str(file_path / f'best_model.pt'), map_location=device)
         else:
@@ -795,10 +806,107 @@ class Trainer(object):
         
         if 'scheduler' in data:
             self.lr_scheduler.load_state_dict(data['scheduler'])
-        # For backwards compatibility with earlier models
         
         if exists(self.accelerator.scaler) and exists(data['scaler']):
             self.accelerator.scaler.load_state_dict(data['scaler'])
+
+        # Also load LoRA weights if available
+        if self.args.use_diffusion_lora and file_path.joinpath('lora_weights').exists():
+            self.load_lora(file_path=file_path / 'lora_weights', best=best)
+            
+    def save_lora(self, subfolder="lora_weights", best=False):
+        """Save only the LoRA adapter weights"""
+        if not self.accelerator.is_local_main_process:
+            return
+
+        if not self.args.use_diffusion_lora:
+            print("Model doesn't use LoRA adapters, skipping save_lora")
+            return
+
+        # Create the save directory
+        save_directory = self.results_folder / (f"best_{subfolder}" if best else subfolder)
+        save_directory.mkdir(exist_ok=True, parents=True)
+        
+        # Unwrap model from accelerator and EMA to get the base diffusion model
+        unwrapped_model = self.accelerator.unwrap_model(self.diffusion)
+        if best and hasattr(self, 'ema'):
+            # Save from the EMA model if we're saving the best model
+            unwrapped_diffusion_model = self.ema.ema_model.diffusion_model
+        else:
+            unwrapped_diffusion_model = unwrapped_model.diffusion_model
+        
+        # Save just the LoRA weights using PEFT's save_pretrained
+        unwrapped_diffusion_model.save_pretrained(save_directory)
+        
+        # Also save training info
+        lora_info = {
+            'step': self.step,
+            'best_seq2seq_metric': self.best_seq2seq_metric if hasattr(self, 'best_seq2seq_metric') else None,
+        }
+        torch.save(lora_info, save_directory / "lora_training_info.pt")
+        
+        print(f"Saved LoRA weights to {save_directory}")
+    
+    def load_lora(self, subfolder="lora_weights", best=False, file_path=None):
+        """Load only the LoRA adapter weights"""
+        if not self.args.use_diffusion_lora:
+            print("Model doesn't use LoRA adapters, skipping load_lora")
+            return
+        
+        # Determine the load directory
+        if file_path is not None:
+            load_dir = Path(file_path)
+        else:
+            load_dir = self.results_folder / (f"best_{subfolder}" if best else subfolder)
+        
+        if not load_dir.exists():
+            print(f"LoRA weights not found at {load_dir}, skipping load_lora")
+            return
+        
+        from peft import PeftModel, PeftConfig
+        
+        # Unwrap model from accelerator to get the base diffusion model
+        unwrapped_model = self.accelerator.unwrap_model(self.diffusion)
+        
+        # Load the LoRA weights
+        print(f"Loading LoRA weights from {load_dir}")
+        
+        # Need to load into both the main model and EMA model
+        # Main model
+        unwrapped_model.diffusion_model.load_adapter(load_dir, adapter_name="default")
+        
+        # EMA model if available
+        if hasattr(self, 'ema'):
+            self.ema.ema_model.diffusion_model.load_adapter(load_dir, adapter_name="default")
+        
+        # Load training info if available
+        info_path = load_dir / "lora_training_info.pt"
+        if info_path.exists():
+            lora_info = torch.load(info_path)
+            if 'step' in lora_info and self.args.resume_training:
+                self.step = lora_info['step']
+            if 'best_seq2seq_metric' in lora_info:
+                self.best_seq2seq_metric = lora_info['best_seq2seq_metric']
+            print(f"Resumed from step {self.step}")
+
+    def merge_and_unload_lora(self):
+        """Merge LoRA weights into the base model and unload the adapter"""
+        if not self.args.use_diffusion_lora:
+            print("Model doesn't use LoRA adapters, skipping merge_and_unload_lora")
+            return
+        
+        # Unwrap model from accelerator
+        unwrapped_model = self.accelerator.unwrap_model(self.diffusion)
+        
+        # Merge weights for the main model
+        print("Merging LoRA weights into base model...")
+        unwrapped_model.diffusion_model.merge_and_unload()
+        
+        # Also merge weights for EMA model if available
+        if hasattr(self, 'ema'):
+            self.ema.ema_model.diffusion_model.merge_and_unload()
+    
+        print("LoRA weights merged successfully")
 
     def log_reference_metrics(self, test=False):
         accelerator = self.accelerator
@@ -838,10 +946,15 @@ class Trainer(object):
             
             
     @torch.no_grad()
-    def sample(self, num_samples=None, class_id=None, seed=42, test=False, cls_free_guidance=1.0):
+    def sample(self, num_samples=None, class_id=None, seed=42, test=False, cls_free_guidance=1.0, lora_path=None):
         num_samples = default(num_samples, self.num_samples)
         accelerator = self.accelerator
         device = accelerator.device
+        
+        if self.args.use_diffusion_lora and lora_path is not None:
+            print(f"Loading LoRA weights from {lora_path} for sampling")
+            self.load_lora(file_path=lora_path)
+        
         self.diffusion.to('cpu')
         torch.cuda.empty_cache() 
 
@@ -1146,6 +1259,16 @@ class Trainer(object):
         accelerator = self.accelerator
         device = accelerator.device
 
+        if self.args.resume_training and self.args.use_diffusion_lora and self.step > 0:
+            print(f"Resuming training with LoRA at step {self.step}")
+            self.load_lora(best=False)
+
+        if self.args.use_diffusion_lora:
+            from peft import PeftModel
+            assert isinstance(self.diffusion.diffusion_model, PeftModel) and (isinstance(self.ema.ema_model.diffusion_model, PeftModel) if self.ema)
+            self.ema.ema_model.diffusion_model.print_trainable_parameters()
+            print(f"[LORA] adapted lora module: {self.ema.ema_model.diffusion_model.targeted_module_names}")
+        
         with tqdm(initial = self.step, total = self.train_num_steps, disable = not accelerator.is_main_process) as pbar:
 
             while self.step < self.train_num_steps:
@@ -1289,4 +1412,13 @@ class Trainer(object):
                 pbar.update(1)
             accelerator.wait_for_everyone()
         self.save()
+        
+        if self.args.use_diffusion_lora and accelerator.is_main_process:
+            self.save_lora(subfolder="lora_weights_final")
+        
+        # Optionally merge LoRA weights into base model
+        if self.args.merge_lora_at_end:
+            self.merge_and_unload_lora()
+            self.save()  # Save the merged model
+        
         accelerator.print('training complete')

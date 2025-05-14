@@ -6,6 +6,8 @@ import os
 import numpy as np
 import torch
 
+from peft import LoraConfig, get_peft_model, TaskType
+
 import CONSTANTS
 from diffusion.text_denoising_diffusion import GaussianDiffusion, Trainer
 from model.diffusion_transformer import DiffusionTransformer
@@ -52,7 +54,21 @@ def main(args):
         num_dense_connections=args.num_dense_connections,
     ).cuda()
 
+    if args.use_diffusion_lora:
+        #TODO: add lora to diffusion model
+        lora_config = LoraConfig(
+            r=16,
+            lora_alpha=32,
+            lora_dropout=0.1,
+            target_modules=["input_proj", "output_proj", "to_q", "to_v", "to_out"],   
+            task_type=TaskType.FEATURE_EXTRACTION,
+        )
+        model = get_peft_model(model, lora_config)
+    
     args.trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    args.all_params = sum(p.numel() for p in model.parameters())
+    
+    print(f"Trainable parameters: {args.trainable_params} ({args.trainable_params/args.all_params:.2%} of total)")
 
     diffusion = GaussianDiffusion(
         model,
@@ -92,11 +108,14 @@ def main(args):
     )
 
     if args.eval:
-        trainer.load(args.resume_dir, best=trainer.diffusion.diffusion_model.seq2seq)
+        if args.use_diffusion_lora:
+            trainer.load(args.resume_dir, lora_only=True)
+        else:
+            trainer.load(args.resume_dir, best=trainer.diffusion.diffusion_model.seq2seq)
         if trainer.diffusion.diffusion_model.seq2seq:
             trainer.sample_seq2seq(cls_free_guidance=2.0, incremental=False)
         else:
-            trainer.sample()
+            trainer.sample(lora_path=args.lora_path)
         if args.class_conditional:
             for class_id in range(model.num_classes):
                 trainer.sample(class_id=class_id)
@@ -120,6 +139,8 @@ def main(args):
     if args.init_path:
         trainer.load(args.init_path, init_only=True)
 
+    if args.use_diffusion_lora:
+        trainer.load(args.resume_dir, init_only=True)
     trainer.train()
 
 if __name__ == "__main__":
@@ -210,6 +231,23 @@ if __name__ == "__main__":
     parser.add_argument("--class_conditional", action="store_true", default=False)
     parser.add_argument("--class_unconditional_prob", type=float, default=.1)
     parser.add_argument("--seq2seq_unconditional_prob", type=float, default=0.1)
+    # lora arguments
+    parser.add_argument(
+        "--use_diffusion_lora",
+        action="store_true",
+        help="Enable LoRA fine-tuning. If specified, only LoRA parameters will be trained."
+    )
+    parser.add_argument(
+        "--use_encoder_lora",
+        action="store_true",
+        help="Enable LoRA fine-tuning. If specified, only LoRA parameters will be trained."
+    )
+    parser.add_argument('--lora_path', type=str, default=None,
+                   help='Path to LoRA weights to use for sampling')
+    parser.add_argument('--merge_lora_at_end', action='store_true',
+                    help='Merge LoRA weights into base model at the end of training')
+    parser.add_argument('--save_lora_checkpoints', action='store_true',
+                    help='Save timestamped LoRA checkpoints during training')
     # Accelerate arguments
     parser.add_argument("--amp", action="store_true", default=False)
     parser.add_argument(
