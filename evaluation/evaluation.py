@@ -1,7 +1,7 @@
 import torch
 from evaluate import load
 from transformers import PreTrainedTokenizerBase
-from sentence_transformers import SentenceTransformer
+# from sentence_transformers import SentenceTransformer
 from nltk.util import ngrams
 from collections import defaultdict
 import spacy

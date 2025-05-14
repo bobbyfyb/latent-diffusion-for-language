@@ -55,7 +55,7 @@ def get_dataset(dataset_name, metadata=False, synthetic_train_path=None):
         del(dataset['validation'])
         dataset = process_wmt14_dataset(dataset, 'en-en')
     elif dataset_name == 'c4' or dataset_name == 'c4-cond':
-        dataset = load_dataset('allenai/c4', 'en')
+        dataset = load_dataset('allenai/c4', 'en', cache_dir='/data2/fyb/c4')
         train_ds = dataset['train']
         val_ds = dataset['validation']
         val_test_ds = val_ds.train_test_split(test_size=1000, seed=42)
