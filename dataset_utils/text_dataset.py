@@ -54,18 +54,40 @@ def get_dataset(dataset_name, metadata=False, synthetic_train_path=None):
         dataset['valid'] = dataset['validation']
         del(dataset['validation'])
         dataset = process_wmt14_dataset(dataset, 'en-en')
-    elif dataset_name == 'c4':
+    elif dataset_name == 'c4' or dataset_name == 'c4-cond':
         dataset = load_dataset('allenai/c4', 'en')
-        dataset['valid'] = dataset['validation']
-        del(dataset['validation'])
-        dataset = process_c4_dataset(dataset)
+        train_ds = dataset['train']
+        val_ds = dataset['validation']
+        val_test_ds = val_ds.train_test_split(test_size=1000, seed=42)
+        train_val_test_ds = train_ds
+        train_val_test_ds['valid'] = val_test_ds['train']
+        train_val_test_ds['test'] = val_test_ds['test']
+        if dataset_name == 'c4':
+            dataset = process_c4_dataset(train_val_test_ds)
+        else:
+            dataset = process_c4_cond_dataset(train_val_test_ds)
     else:
         raise NotImplementedError
     return dataset
 
 def process_c4_dataset(dataset):
-    ##TODO: Implement this function
-    pass
+    def process_c4_text(example):
+        text = example['text']
+        return {'text': PreTrainedTokenizerBase.clean_up_tokenization(text.strip())}
+    dataset = dataset.map(process_c4_text, remove_columns=['text', 'timestamp', 'url'])
+    dataset = dataset.shuffle(seed=42)
+    return dataset
+
+def process_c4_cond_dataset(dataset):
+    def process_c4_cond_text(example):
+        text = PreTrainedTokenizerBase.clean_up_tokenization(example['text'].strip())
+        prefix = text[:32]
+        continuation = text[32:]
+        return {'text': continuation, 'context': prefix}
+    dataset = dataset.map(process_c4_cond_text, remove_columns=['text', 'timestamp', 'url'])
+    dataset = dataset.shuffle(seed=42)
+    return dataset
+
 
 def process_roc_dataset(dataset):
     def extract_roc_text(example):
@@ -129,13 +151,13 @@ def parse_metadata(metadata):
 def get_dataloader(args, dataset, model_config, tokenizer, max_seq_len, mode='diffusion', shuffle=True, context_tokenizer=None):
     def tokenization(example):
         # print('EXAMPLE: ', example)
-        if mode == 'diffusion' and args.dataset_name in {'xsum', 'qqp',  'wmt14-en-de', 'wmt14-de-en'}:
+        if mode == 'diffusion' and args.dataset_name in {'xsum', 'qqp',  'wmt14-en-de', 'wmt14-de-en', 'c4-cond'}:
             # import pdb; pdb.set_trace()
             assert context_tokenizer is not None
             source = example['context']
             target = example['text']
 
-            if args.dataset_name in {'qqp', 'wmt14-en-de', 'wmt14-de-en'}:
+            if args.dataset_name in {'qqp', 'wmt14-en-de', 'wmt14-de-en', 'c4-cond'}:
                 cond_inputs = context_tokenizer(source, padding="max_length", truncation=True, max_length=max_seq_len)
             elif args.dataset_name in {'xsum',}:
                 cond_inputs = context_tokenizer(source, padding="max_length", truncation=True, max_length=max_seq_len*4)
@@ -162,7 +184,7 @@ def get_dataloader(args, dataset, model_config, tokenizer, max_seq_len, mode='di
     else:
         raise NotImplementedError
     
-    if args.dataset_name in {'xsum', 'qqp'} or 'wmt14' in args.dataset_name:
+    if args.dataset_name in {'xsum', 'qqp', 'c4-cond'} or 'wmt14' in args.dataset_name:
         dataset = dataset.map(tokenization, remove_columns=['text', 'context'], batched=True, num_proc=None)
     else:
         dataset = dataset.map(tokenization, remove_columns='text')
