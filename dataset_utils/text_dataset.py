@@ -54,10 +54,18 @@ def get_dataset(dataset_name, metadata=False, synthetic_train_path=None):
         dataset['valid'] = dataset['validation']
         del(dataset['validation'])
         dataset = process_wmt14_dataset(dataset, 'en-en')
+    elif dataset_name == 'c4':
+        dataset = load_dataset('allenai/c4', 'en')
+        dataset['valid'] = dataset['validation']
+        del(dataset['validation'])
+        dataset = process_c4_dataset(dataset)
     else:
         raise NotImplementedError
     return dataset
 
+def process_c4_dataset(dataset):
+    ##TODO: Implement this function
+    pass
 
 def process_roc_dataset(dataset):
     def extract_roc_text(example):
