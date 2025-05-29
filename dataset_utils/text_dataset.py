@@ -2,8 +2,8 @@ from multiprocessing.spawn import prepare
 import os
 import json
 
-from datasets import load_dataset, Value
-from torch.utils.data import Dataset, DataLoader
+from datasets import load_dataset, Dataset
+from torch.utils.data import DataLoader
 from transformers import PreTrainedTokenizerBase, default_data_collator
 
 from dataset_utils.denoising_collator import DataCollatorForBartDenoisingLM
@@ -34,6 +34,10 @@ def get_dataset(dataset_name, metadata=False, synthetic_train_path=None):
         qqp_data_path = 'datasets/qqp'
         dataset = load_dataset("text", data_files={f'{split}': os.path.join(qqp_data_path, f'{split}.jsonl') for split in ['train', 'valid', 'test']})
         dataset = process_qqp_dataset(dataset)
+    elif dataset_name == 'commongen':
+        commongen_data_path = 'datasets/commongen'
+        dataset = load_dataset("text", data_files={f'{split}': os.path.join(commongen_data_path, f'{split}.jsonl') for split in ['train', 'valid', 'test']})
+        dataset = process_commongen_dataset(dataset)
     elif dataset_name == 'wmt14-de-en':
         dataset = load_dataset('wmt14', 'de-en')
         dataset['valid'] = dataset['validation']
@@ -55,20 +59,50 @@ def get_dataset(dataset_name, metadata=False, synthetic_train_path=None):
         del(dataset['validation'])
         dataset = process_wmt14_dataset(dataset, 'en-en')
     elif dataset_name == 'c4' or dataset_name == 'c4-cond':
-        dataset = load_dataset('allenai/c4', 'en', cache_dir='/data2/fyb/c4')
-        train_ds = dataset['train']
-        val_ds = dataset['validation']
-        val_test_ds = val_ds.train_test_split(test_size=1000, seed=42)
-        train_val_test_ds = train_ds
-        train_val_test_ds['valid'] = val_test_ds['train']
-        train_val_test_ds['test'] = val_test_ds['test']
+        train_ds = load_dataset('allenai/c4', 'en', cache_dir='/data2/fyb/c4', split='train[:100000]')
+        val_ds = load_dataset('allenai/c4', 'en', cache_dir='/data2/fyb/c4', split='validation')
+        train_test_ds = train_ds.train_test_split(test_size=1000, seed=42)
+        train_test_ds['valid'] = val_ds
         if dataset_name == 'c4':
-            dataset = process_c4_dataset(train_val_test_ds)
+            dataset = process_c4_dataset(train_test_ds)
         else:
-            dataset = process_c4_cond_dataset(train_val_test_ds)
+            dataset = process_c4_cond_dataset(train_test_ds)
+    elif dataset_name == 'openwebtext' or dataset_name == 'openwebtext-cond':
+        ds = load_dataset('Skylion007/openwebtext', cache_dir='data2/fyb/openwebtext', split='train[:100000]', trust_remote_code=True)
+        train_test_ds = ds.train_test_split(test_size=10000, seed=42)
+        test_ds = train_test_ds['test']
+        test_val_ds = test_ds.train_test_split(test_size=2000, shuffle=False)
+        test_ds = test_val_ds['test']
+        val_ds = test_val_ds['train']
+        train_test_ds['valid'] = val_ds
+        train_test_ds['test'] = test_ds
+        if dataset_name == 'openwebtext':
+            dataset = process_openwebtext_dataset(train_test_ds)
+        else:
+            dataset = process_openwebtext_cond_dataset(train_test_ds)
     else:
         raise NotImplementedError
     return dataset
+
+
+def process_openwebtext_dataset(dataset):
+    def process_openwebtext_text(example):
+        text = example['text']
+        return {'text': PreTrainedTokenizerBase.clean_up_tokenization(text.strip())}
+    dataset = dataset.map(process_openwebtext_text, remove_columns=['text'])
+    dataset.shuffle(seed=42)
+    return dataset
+
+def process_openwebtext_cond_dataset(dataset):
+    def process_openwebtext_cond_text(example):
+        text = PreTrainedTokenizerBase.clean_up_tokenization(example['text'].strip())
+        prefix = text[:32]
+        continuation = text[32:]
+        return {'text': continuation, 'context': prefix}
+    dataset = dataset.map(process_openwebtext_cond_text, remove_columns=['text'])
+    dataset.shuffle(seed=42)
+    return dataset
+
 
 def process_c4_dataset(dataset):
     def process_c4_text(example):
@@ -130,6 +164,19 @@ def process_qqp_dataset(dataset):
     dataset = dataset.shuffle(seed=42)
     return dataset
 
+def process_commongen_dataset(dataset):
+    def process_commongen_text(example):
+        dict_example = json.loads(example['text'])
+        dict_example['text'] = dict_example['trg']
+        dict_example['context'] = dict_example['src']
+        del dict_example['trg']
+        del dict_example['src']
+        return dict_example
+    dataset = dataset.map(process_commongen_text, )
+    dataset = dataset.shuffle(seed=42)
+    return dataset
+
+
 def process_wmt14_dataset(dataset, lang_pair):
     def process_wmt14_text(example, lang_pair):
         source, target = lang_pair.split('-')
@@ -151,13 +198,13 @@ def parse_metadata(metadata):
 def get_dataloader(args, dataset, model_config, tokenizer, max_seq_len, mode='diffusion', shuffle=True, context_tokenizer=None):
     def tokenization(example):
         # print('EXAMPLE: ', example)
-        if mode == 'diffusion' and args.dataset_name in {'xsum', 'qqp',  'wmt14-en-de', 'wmt14-de-en', 'c4-cond'}:
+        if mode == 'diffusion' and args.dataset_name in {'xsum', 'qqp', 'commongen', 'wmt14-en-de', 'wmt14-de-en', 'c4-cond', 'openwebtext-cond'}:
             # import pdb; pdb.set_trace()
             assert context_tokenizer is not None
             source = example['context']
             target = example['text']
 
-            if args.dataset_name in {'qqp', 'wmt14-en-de', 'wmt14-de-en', 'c4-cond'}:
+            if args.dataset_name in {'qqp', 'commongen', 'wmt14-en-de', 'wmt14-de-en', 'c4-cond', 'openwebtext-cond'}:
                 cond_inputs = context_tokenizer(source, padding="max_length", truncation=True, max_length=max_seq_len)
             elif args.dataset_name in {'xsum',}:
                 cond_inputs = context_tokenizer(source, padding="max_length", truncation=True, max_length=max_seq_len*4)
@@ -184,7 +231,7 @@ def get_dataloader(args, dataset, model_config, tokenizer, max_seq_len, mode='di
     else:
         raise NotImplementedError
     
-    if args.dataset_name in {'xsum', 'qqp', 'c4-cond'} or 'wmt14' in args.dataset_name:
+    if args.dataset_name in {'xsum', 'qqp', 'commongen', 'c4-cond', 'openwebtext-cond'} or 'wmt14' in args.dataset_name:
         dataset = dataset.map(tokenization, remove_columns=['text', 'context'], batched=True, num_proc=None)
     else:
         dataset = dataset.map(tokenization, remove_columns='text')

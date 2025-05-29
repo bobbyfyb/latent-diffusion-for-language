@@ -1,0 +1,22 @@
+CUDA_LAUNCH_BLOCKING=1 python train_text_diffusion.py \
+    --dataset_name commongen \
+    --learning_rate 2e-4 \
+    --num_train_steps 250000 \
+    --train_batch_size 128 \
+    --tx_dim 768 \
+    --tx_depth 12 \
+    --objective pred_v \
+    --enc_dec_model facebook/bart-base \
+    --num_samples 1000 \
+    --self_condition \
+    --scale_shift \
+    --loss_type l2 \
+    --train_schedule cosine \
+    --wandb_name commongen_latent_v \
+    --sampling_timesteps 250 \
+    --latent_model_path saved_latent_models/c4/2025-05-16_13-37-18 \
+    --save_and_sample_every 5000 \
+    --num_dense_connections 3  \
+    --optimizer adamw \
+    --train_prob_self_cond 0.5 \
+
