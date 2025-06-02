@@ -1,11 +1,11 @@
 python train_text_diffusion.py \
 --eval_test \
---resume_dir saved_diff_models/roc/2025-05-09_16-45-16 \
+--resume_dir saved_diff_models/commongen/2025-05-29_11-10-44 \
 --sampling_timesteps 250 \
---num_samples 1000 \
---wandb_name roc_ddim \
+--num_samples 100000 \
+--wandb_name commongen_ddim \
 --sampler ddpm \
 --sampling_schedule cosine \
---dataset_name roc \
---output_dir ./eval_results \
+--dataset_name commongen \
+--output_dir ./eval_results/commongen \
 # Need to update resume_dir to the correct path
