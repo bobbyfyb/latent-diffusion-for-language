@@ -132,3 +132,6 @@ dmypy.json
 **/saved_diff_models
 **/saved_latent_models
 *.pt
+
+**/wandb
+eval_results
