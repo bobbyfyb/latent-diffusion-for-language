@@ -2,8 +2,8 @@ from multiprocessing.spawn import prepare
 import os
 import json
 
-from datasets import load_dataset, Value
-from torch.utils.data import Dataset, DataLoader
+from datasets import load_dataset, Dataset
+from torch.utils.data import DataLoader
 from transformers import PreTrainedTokenizerBase, default_data_collator
 
 from dataset_utils.denoising_collator import DataCollatorForBartDenoisingLM
@@ -34,6 +34,10 @@ def get_dataset(dataset_name, metadata=False, synthetic_train_path=None):
         qqp_data_path = 'datasets/qqp'
         dataset = load_dataset("text", data_files={f'{split}': os.path.join(qqp_data_path, f'{split}.jsonl') for split in ['train', 'valid', 'test']})
         dataset = process_qqp_dataset(dataset)
+    elif dataset_name == 'commongen':
+        commongen_data_path = 'datasets/commongen'
+        dataset = load_dataset("text", data_files={f'{split}': os.path.join(commongen_data_path, f'{split}.jsonl') for split in ['train', 'valid', 'test']})
+        dataset = process_commongen_dataset(dataset)
     elif dataset_name == 'wmt14-de-en':
         dataset = load_dataset('wmt14', 'de-en')
         dataset['valid'] = dataset['validation']
@@ -100,6 +104,19 @@ def process_qqp_dataset(dataset):
     dataset = dataset.shuffle(seed=42)
     return dataset
 
+def process_commongen_dataset(dataset):
+    def process_commongen_text(example):
+        dict_example = json.loads(example['text'])
+        dict_example['text'] = dict_example['trg']
+        dict_example['context'] = dict_example['src']
+        del dict_example['trg']
+        del dict_example['src']
+        return dict_example
+    dataset = dataset.map(process_commongen_text, )
+    dataset = dataset.shuffle(seed=42)
+    return dataset
+
+
 def process_wmt14_dataset(dataset, lang_pair):
     def process_wmt14_text(example, lang_pair):
         source, target = lang_pair.split('-')
@@ -121,13 +138,13 @@ def parse_metadata(metadata):
 def get_dataloader(args, dataset, model_config, tokenizer, max_seq_len, mode='diffusion', shuffle=True, context_tokenizer=None):
     def tokenization(example):
         # print('EXAMPLE: ', example)
-        if mode == 'diffusion' and args.dataset_name in {'xsum', 'qqp',  'wmt14-en-de', 'wmt14-de-en'}:
+        if mode == 'diffusion' and args.dataset_name in {'xsum', 'qqp', 'commongen', 'wmt14-en-de', 'wmt14-de-en'}:
             # import pdb; pdb.set_trace()
             assert context_tokenizer is not None
             source = example['context']
             target = example['text']
 
-            if args.dataset_name in {'qqp', 'wmt14-en-de', 'wmt14-de-en'}:
+            if args.dataset_name in {'qqp', 'commongen', 'wmt14-en-de', 'wmt14-de-en'}:
                 cond_inputs = context_tokenizer(source, padding="max_length", truncation=True, max_length=max_seq_len)
             elif args.dataset_name in {'xsum',}:
                 cond_inputs = context_tokenizer(source, padding="max_length", truncation=True, max_length=max_seq_len*4)
@@ -154,7 +171,7 @@ def get_dataloader(args, dataset, model_config, tokenizer, max_seq_len, mode='di
     else:
         raise NotImplementedError
     
-    if args.dataset_name in {'xsum', 'qqp'} or 'wmt14' in args.dataset_name:
+    if args.dataset_name in {'xsum', 'qqp', 'commongen'} or 'wmt14' in args.dataset_name:
         dataset = dataset.map(tokenization, remove_columns=['text', 'context'], batched=True, num_proc=None)
     else:
         dataset = dataset.map(tokenization, remove_columns='text')

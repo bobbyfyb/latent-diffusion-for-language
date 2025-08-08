@@ -945,7 +945,7 @@ class Trainer(object):
         self.ema.to(device)
 
     @torch.no_grad()
-    def sample_seq2seq(self, num_samples=None, split='val', seed=42, num_candidates=None, cls_free_guidance=1.0,):
+    def sample_seq2seq(self, num_samples=None, split='val', seed=42, num_candidates=None, cls_free_guidance=1.0, incremental=False):
         assert split in ['train', 'val', 'test']
         num_samples = default(num_samples, self.num_samples) if split != 'test' else len(self.dataset['test'])
         num_candidates = default(num_candidates, self.seq2seq_candidates)
