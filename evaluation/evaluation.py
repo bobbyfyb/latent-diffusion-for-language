@@ -120,3 +120,5 @@ def compute_rouge(all_texts_list, human_references, use_aggregator=True, use_ste
     
     return results
 
+if __name__ == "__main__":
+    print(" test of compute rouge: ", compute_rouge(["the cat is on the mat"], ["the cat is on the mat"]))

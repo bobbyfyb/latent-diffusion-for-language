@@ -38,6 +38,10 @@ def get_dataset(dataset_name, metadata=False, synthetic_train_path=None):
         commongen_data_path = 'datasets/commongen'
         dataset = load_dataset("text", data_files={f'{split}': os.path.join(commongen_data_path, f'{split}.jsonl') for split in ['train', 'valid', 'test']})
         dataset = process_commongen_dataset(dataset)
+    elif dataset_name == 'dimongen':
+        dimongen_data_path = 'datasets/dimongen'
+        dataset = load_dataset("text", data_files={f'{split}': os.path.join(dimongen_data_path, f'{split}.json') for split in ['train', 'valid', 'test']})
+        dataset = process_dimongen_dataset(dataset)
     elif dataset_name == 'wmt14-de-en':
         dataset = load_dataset('wmt14', 'de-en')
         dataset['valid'] = dataset['validation']
@@ -116,6 +120,18 @@ def process_commongen_dataset(dataset):
     dataset = dataset.shuffle(seed=42)
     return dataset
 
+def process_dimongen_dataset(dataset):
+    def process_dimongen_text(example):
+        dict_example = json.loads(example['text'])
+        dict_example['text'] = dict_example['trg']
+        dict_example['context'] = dict_example['src']
+        del dict_example['trg']
+        del dict_example['src']
+        return dict_example
+    dataset = dataset.map(process_dimongen_text, )
+    dataset = dataset.shuffle(seed=42)
+    return dataset
+
 
 def process_wmt14_dataset(dataset, lang_pair):
     def process_wmt14_text(example, lang_pair):
@@ -138,13 +154,13 @@ def parse_metadata(metadata):
 def get_dataloader(args, dataset, model_config, tokenizer, max_seq_len, mode='diffusion', shuffle=True, context_tokenizer=None):
     def tokenization(example):
         # print('EXAMPLE: ', example)
-        if mode == 'diffusion' and args.dataset_name in {'xsum', 'qqp', 'commongen', 'wmt14-en-de', 'wmt14-de-en'}:
+        if mode == 'diffusion' and args.dataset_name in {'xsum', 'qqp', 'commongen', 'dimongen','wmt14-en-de', 'wmt14-de-en'}:
             # import pdb; pdb.set_trace()
             assert context_tokenizer is not None
             source = example['context']
             target = example['text']
 
-            if args.dataset_name in {'qqp', 'commongen', 'wmt14-en-de', 'wmt14-de-en'}:
+            if args.dataset_name in {'qqp', 'commongen', 'dimongen', 'wmt14-en-de', 'wmt14-de-en'}:
                 cond_inputs = context_tokenizer(source, padding="max_length", truncation=True, max_length=max_seq_len)
             elif args.dataset_name in {'xsum',}:
                 cond_inputs = context_tokenizer(source, padding="max_length", truncation=True, max_length=max_seq_len*4)
@@ -171,7 +187,7 @@ def get_dataloader(args, dataset, model_config, tokenizer, max_seq_len, mode='di
     else:
         raise NotImplementedError
     
-    if args.dataset_name in {'xsum', 'qqp', 'commongen'} or 'wmt14' in args.dataset_name:
+    if args.dataset_name in {'xsum', 'qqp', 'commongen', 'dimongen'} or 'wmt14' in args.dataset_name:
         dataset = dataset.map(tokenization, remove_columns=['text', 'context'], batched=True, num_proc=None)
     else:
         dataset = dataset.map(tokenization, remove_columns='text')
@@ -188,5 +204,5 @@ def get_dataloader(args, dataset, model_config, tokenizer, max_seq_len, mode='di
 
 if __name__ == "__main__":
 
-    dataset = get_dataset('roc')
+    dataset = get_dataset('dimongen')
     print(dataset['train'][0])

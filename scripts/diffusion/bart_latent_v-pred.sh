@@ -1,5 +1,5 @@
 python train_text_diffusion.py \
---dataset_name nq \
+--dataset_name commongen \
 --learning_rate 2e-4 \
 --num_train_steps 250000 \
 --train_batch_size 128 \
@@ -13,9 +13,9 @@ python train_text_diffusion.py \
 --train_schedule cosine \
 --wandb_name roc_latent_v \
 --sampling_timesteps 250 \
---latent_model_path saved_latent_models/c4/2025-05-16_13-37-18 \
+--latent_model_path saved_latent_models/commongen/2025-08-08_16-06-05 \
 --save_and_sample_every 5000 \
---num_dense_connections 3  \
+--num_dense_connections 3 \
 --optimizer adamw \
 --train_prob_self_cond 0.5
 # Need to update latent_model_path to the correct path
