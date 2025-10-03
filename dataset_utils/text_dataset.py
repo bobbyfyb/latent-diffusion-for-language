@@ -13,7 +13,7 @@ def exists(x):
     return x is not None
 
 
-def get_dataset(dataset_name, metadata=False, synthetic_train_path=None):
+def get_dataset(dataset_name, metadata=False, synthetic_train_path=None, is_rag=False, top_k=5):
     if dataset_name == 'roc':
         roc_data_path = 'datasets/ROCstory'
         dataset = load_dataset("text", data_files={f'{split}': os.path.join(roc_data_path, f'roc_{split}.json') for split in ['train', 'valid']})
@@ -35,13 +35,23 @@ def get_dataset(dataset_name, metadata=False, synthetic_train_path=None):
         dataset = load_dataset("text", data_files={f'{split}': os.path.join(qqp_data_path, f'{split}.jsonl') for split in ['train', 'valid', 'test']})
         dataset = process_qqp_dataset(dataset)
     elif dataset_name == 'commongen':
-        commongen_data_path = 'datasets/commongen'
-        dataset = load_dataset("text", data_files={f'{split}': os.path.join(commongen_data_path, f'{split}.jsonl') for split in ['train', 'valid', 'test']})
-        dataset = process_commongen_dataset(dataset)
+        if is_rag:
+            commongen_data_path = f'datasets/commongen'
+            dataset = load_dataset("text", data_files={f'{split}': os.path.join(commongen_data_path, f'{split}_argumented_{top_k}.jsonl') for split in ['train', 'valid', 'test']})
+            dataset = process_commongen_argumented_dataset(dataset)
+        else:
+            commongen_data_path = 'datasets/commongen'
+            dataset = load_dataset("text", data_files={f'{split}': os.path.join(commongen_data_path, f'{split}.jsonl') for split in ['train', 'valid', 'test']})
+            dataset = process_commongen_dataset(dataset)
     elif dataset_name == 'dimongen':
-        dimongen_data_path = 'datasets/dimongen'
-        dataset = load_dataset("text", data_files={f'{split}': os.path.join(dimongen_data_path, f'{split}.json') for split in ['train', 'valid', 'test']})
-        dataset = process_dimongen_dataset(dataset)
+        if is_rag:
+            dimongen_data_path = f'datasets/dimongen'
+            dataset = load_dataset("text", data_files={f'{split}': os.path.join(dimongen_data_path, f'{split}_argumented_{top_k}.jsonl') for split in ['train', 'valid', 'test']})
+            dataset = process_dimongen_argumented_dataset(dataset)
+        else:
+            dimongen_data_path = 'datasets/dimongen'
+            dataset = load_dataset("text", data_files={f'{split}': os.path.join(dimongen_data_path, f'{split}.jsonl') for split in ['train', 'valid', 'test']})
+            dataset = process_dimongen_dataset(dataset)
     elif dataset_name == 'wmt14-de-en':
         dataset = load_dataset('wmt14', 'de-en')
         dataset['valid'] = dataset['validation']
@@ -120,18 +130,46 @@ def process_commongen_dataset(dataset):
     dataset = dataset.shuffle(seed=42)
     return dataset
 
-def process_dimongen_dataset(dataset):
-    def process_dimongen_text(example):
+def process_commongen_argumented_dataset(dataset):
+    def process_commongen_argumented_text(example):
         dict_example = json.loads(example['text'])
         dict_example['text'] = dict_example['trg']
         dict_example['context'] = dict_example['src']
+        dict_example['observations'] = dict_example['retrieved_passages']
         del dict_example['trg']
+        del dict_example['src']
+        del dict_example['retrieved_passages']
+        return dict_example
+    dataset = dataset.map(process_commongen_argumented_text, )
+    dataset = dataset.shuffle(seed=42)
+    return dataset
+
+def process_dimongen_dataset(dataset):
+    def process_dimongen_text(example):
+        dict_example = json.loads(example['text'])
+        dict_example['text'] = dict_example['tgt']
+        dict_example['context'] = dict_example['src']
+        del dict_example['tgt']
         del dict_example['src']
         return dict_example
     dataset = dataset.map(process_dimongen_text, )
     dataset = dataset.shuffle(seed=42)
     return dataset
 
+def process_dimongen_argumented_dataset(dataset):
+    def process_dimongen_argumented_text(example):
+        dict_example = json.loads(example['text'])
+        dict_example['text'] = dict_example['tgt']
+        dict_example['context'] = dict_example['src']
+        dict_example['observations'] = dict_example['retrieved_passages']
+        del dict_example['tgt']
+        del dict_example['src']
+        del dict_example['retrieved_passages']
+        return dict_example
+    dataset = dataset.map(process_dimongen_argumented_text, )
+    dataset = dataset.shuffle(seed=42)
+    return dataset
+    
 
 def process_wmt14_dataset(dataset, lang_pair):
     def process_wmt14_text(example, lang_pair):
@@ -151,17 +189,28 @@ def parse_metadata(metadata):
         return 'Positive' if metadata > 0.5 else 'Negative'
 
 
-def get_dataloader(args, dataset, model_config, tokenizer, max_seq_len, mode='diffusion', shuffle=True, context_tokenizer=None):
+def get_dataloader(args, dataset, model_config, tokenizer, max_seq_len, mode='diffusion', shuffle=True, context_tokenizer=None, is_rag=False, top_k=5):
     def tokenization(example):
         # print('EXAMPLE: ', example)
-        if mode == 'diffusion' and args.dataset_name in {'xsum', 'qqp', 'commongen', 'dimongen','wmt14-en-de', 'wmt14-de-en'}:
+        if mode == 'diffusion' and args.dataset_name in {
+            'xsum', 'qqp', 
+            'commongen',
+            'dimongen', 
+            'wmt14-en-de',
+            'wmt14-de-en'}:
             # import pdb; pdb.set_trace()
             assert context_tokenizer is not None
             source = example['context']
             target = example['text']
 
             if args.dataset_name in {'qqp', 'commongen', 'dimongen', 'wmt14-en-de', 'wmt14-de-en'}:
-                cond_inputs = context_tokenizer(source, padding="max_length", truncation=True, max_length=max_seq_len)
+                if is_rag:
+                    obs = example['observations']
+                    assert type(obs) == list and len(obs) == top_k
+                    source = source + tokenizer.sep_token + (' ' + tokenizer.sep_token + ' ').join(obs)
+                    cond_inputs = context_tokenizer(source, padding="max_length", truncation=True, max_length=max_seq_len*4)
+                else:    
+                    cond_inputs = context_tokenizer(source, padding="max_length", truncation=True, max_length=max_seq_len)
             elif args.dataset_name in {'xsum',}:
                 cond_inputs = context_tokenizer(source, padding="max_length", truncation=True, max_length=max_seq_len*4)
             else:
@@ -188,7 +237,10 @@ def get_dataloader(args, dataset, model_config, tokenizer, max_seq_len, mode='di
         raise NotImplementedError
     
     if args.dataset_name in {'xsum', 'qqp', 'commongen', 'dimongen'} or 'wmt14' in args.dataset_name:
-        dataset = dataset.map(tokenization, remove_columns=['text', 'context'], batched=True, num_proc=None)
+        if is_rag:
+            dataset = dataset.map(tokenization, remove_columns=['text', 'context', 'observations'], batched=True, num_proc=None)
+        else:
+            dataset = dataset.map(tokenization, remove_columns=['text', 'context'], batched=True, num_proc=None)
     else:
         dataset = dataset.map(tokenization, remove_columns='text')
             
@@ -204,5 +256,5 @@ def get_dataloader(args, dataset, model_config, tokenizer, max_seq_len, mode='di
 
 if __name__ == "__main__":
 
-    dataset = get_dataset('dimongen')
+    dataset = get_dataset('dimongen', is_rag=True, top_k=5)
     print(dataset['train'][0])

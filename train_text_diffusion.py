@@ -89,6 +89,8 @@ def main(args):
         results_folder = args.output_dir,
         amp = args.amp,
         mixed_precision = args.mixed_precision,
+        is_rag = args.is_rag,
+        top_k = args.top_k,
     )
 
     if args.eval:
@@ -230,6 +232,8 @@ if __name__ == "__main__":
     parser.add_argument("--resume_dir", type=str, default=None)
     parser.add_argument("--latent_model_path", type=str, default=None)
     parser.add_argument("--init_path", type=str, default=None)
+    parser.add_argument("--is_rag", action="store_true", default=False)
+    parser.add_argument("--top_k", type=int, default=5)
     
     args = parser.parse_args()
     assert not (args.eval and args.resume_training)

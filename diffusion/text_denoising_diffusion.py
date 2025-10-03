@@ -590,6 +590,8 @@ class Trainer(object):
         mixed_precision = 'no',
         decoding_loss = False,
         decoding_loss_weight = 1.0,
+        is_rag = False,
+        top_k = 5,
     ):
         super().__init__()
 
@@ -693,7 +695,11 @@ class Trainer(object):
 
         # dataset and dataloader
         self.dataset_name = dataset_name
-        dataset = text_dataset.get_dataset(dataset_name,)
+        
+        if is_rag:
+            dataset = text_dataset.get_dataset(dataset_name, is_rag=True, top_k=top_k)
+        else:
+            dataset = text_dataset.get_dataset(dataset_name,)
 
         self.dataset = dataset.shuffle(seed=42)
         if args.eval_test:
@@ -707,10 +713,12 @@ class Trainer(object):
         self.train_val_dataloader = text_dataset.get_dataloader(args, dataset['train'].select(range(1000)), self.bart_model.config, self.tokenizer, self.max_seq_len, shuffle=False, context_tokenizer=self.context_tokenizer)
         if args.resume_training:
             dataset['train'] = dataset['train'].shuffle()
-        self.dataloader = text_dataset.get_dataloader(args, self.dataset['train'], self.bart_model.config, self.tokenizer, self.max_seq_len, context_tokenizer=self.context_tokenizer)
-        self.val_dataloader = text_dataset.get_dataloader(args, self.dataset['valid'], self.bart_model.config, self.tokenizer, self.max_seq_len, shuffle=False, context_tokenizer=self.context_tokenizer)
-        self.test_dataloader = text_dataset.get_dataloader(args, self.dataset['test'], self.bart_model.config, self.tokenizer, self.max_seq_len, shuffle=False, context_tokenizer=self.context_tokenizer)
+        self.dataloader = text_dataset.get_dataloader(args, self.dataset['train'], self.bart_model.config, self.tokenizer, self.max_seq_len, context_tokenizer=self.context_tokenizer, is_rag=is_rag, top_k=top_k)
+        self.val_dataloader = text_dataset.get_dataloader(args, self.dataset['valid'], self.bart_model.config, self.tokenizer, self.max_seq_len, shuffle=False, context_tokenizer=self.context_tokenizer, is_rag=is_rag, top_k=top_k)
+        self.test_dataloader = text_dataset.get_dataloader(args, self.dataset['test'], self.bart_model.config, self.tokenizer, self.max_seq_len, shuffle=False, context_tokenizer=self.context_tokenizer, is_rag=is_rag, top_k=top_k)
 
+        print(f"example input sequences: {self.tokenizer.decode(self.dataloader.dataset[0]['input_ids'], skip_special_tokens=False)}")
+        
         if not self.seq2seq:
             training_lengths = [min(sum(self.dataloader.dataset[idx]['attention_mask']), self.max_seq_len) for idx in range(self.dataloader.dataset.num_rows)]
             length_counts = Counter(training_lengths)

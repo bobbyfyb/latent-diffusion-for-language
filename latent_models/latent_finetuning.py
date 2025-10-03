@@ -99,6 +99,8 @@ class Trainer(object):
         results_folder = './results',
         mixed_precision = 'no',
         seed=43,
+        is_rag = False,
+        top_k = 5,
     ):
         super().__init__()
 
@@ -145,18 +147,26 @@ class Trainer(object):
         self.eval_batch_size = eval_batch_size
 
         self.train_num_steps = train_num_steps
-
+        
+        if is_rag:
+            print("***** Using RAG dataset *****")
+            self.dataset = text_dataset.get_dataset(
+                dataset_name, is_rag=True, top_k=top_k,
+            )
+        else:
         # dataset and dataloader
-        self.dataset = text_dataset.get_dataset(
-            dataset_name,
-        )
+            self.dataset = text_dataset.get_dataset(
+                dataset_name,
+            )
 
         if args.eval:
             self.dataset['train'] = self.dataset['train'].select(range(1000))
-        self.dataloader = text_dataset.get_dataloader(args, self.dataset['train'], config, self.tokenizer, args.max_seq_len, context_tokenizer=self.tokenizer)
-        self.val_dataloader = text_dataset.get_dataloader(args, self.dataset['valid'], config, self.tokenizer, args.max_seq_len, shuffle=False, context_tokenizer=self.tokenizer)
+        self.dataloader = text_dataset.get_dataloader(args, self.dataset['train'], config, self.tokenizer, args.max_seq_len, context_tokenizer=self.tokenizer, is_rag=is_rag, top_k=top_k)
+        self.val_dataloader = text_dataset.get_dataloader(args, self.dataset['valid'], config, self.tokenizer, args.max_seq_len, shuffle=False, context_tokenizer=self.tokenizer, is_rag=is_rag, top_k=top_k)
         self.max_seq_len = args.max_seq_len
 
+        print(f"example input sequences: {self.tokenizer.decode(self.dataloader.dataset[0]['input_ids'], skip_special_tokens=False, clean_up_tokenization_spaces=True)}")
+        
         # optimizer
 
         # check that the new latents are added to the optimizer

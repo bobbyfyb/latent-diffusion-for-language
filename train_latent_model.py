@@ -28,6 +28,8 @@ def main(args):
         eval_every = args.eval_every,
         results_folder = args.output_dir,
         mixed_precision=args.mixed_precision,
+        is_rag = args.is_rag,
+        top_k = args.top_k,
     )
 
     if args.resume_dir:
@@ -89,6 +91,8 @@ if __name__ == "__main__":
     parser.add_argument("--eval", action="store_true")
     parser.add_argument("--resume_training", action="store_true", default=False)
     parser.add_argument("--resume_dir", type=str, default=None)
+    parser.add_argument("--is_rag", action="store_true", default=False)
+    parser.add_argument("--top_k", type=int, default=5)
 
     args = parser.parse_args()
 
