@@ -165,7 +165,7 @@ class Trainer(object):
         self.val_dataloader = text_dataset.get_dataloader(args, self.dataset['valid'], config, self.tokenizer, args.max_seq_len, shuffle=False, context_tokenizer=self.tokenizer, is_rag=is_rag, top_k=top_k)
         self.max_seq_len = args.max_seq_len
 
-        print(f"example input sequences: {self.tokenizer.decode(self.dataloader.dataset[0]['input_ids'], skip_special_tokens=False, clean_up_tokenization_spaces=True)}")
+        print(f"example input cond sequences: {self.tokenizer.decode(self.dataloader.dataset[0]['cond_input_ids'], skip_special_tokens=False, clean_up_tokenization_spaces=True)}")
         
         # optimizer
 

@@ -717,7 +717,7 @@ class Trainer(object):
         self.val_dataloader = text_dataset.get_dataloader(args, self.dataset['valid'], self.bart_model.config, self.tokenizer, self.max_seq_len, shuffle=False, context_tokenizer=self.context_tokenizer, is_rag=is_rag, top_k=top_k)
         self.test_dataloader = text_dataset.get_dataloader(args, self.dataset['test'], self.bart_model.config, self.tokenizer, self.max_seq_len, shuffle=False, context_tokenizer=self.context_tokenizer, is_rag=is_rag, top_k=top_k)
 
-        print(f"example input sequences: {self.tokenizer.decode(self.dataloader.dataset[0]['input_ids'], skip_special_tokens=False)}")
+        print(f"example input sequences: {self.tokenizer.decode(self.dataloader.dataset[0]['cond_input_ids'], skip_special_tokens=False)}")
         
         if not self.seq2seq:
             training_lengths = [min(sum(self.dataloader.dataset[idx]['attention_mask']), self.max_seq_len) for idx in range(self.dataloader.dataset.num_rows)]

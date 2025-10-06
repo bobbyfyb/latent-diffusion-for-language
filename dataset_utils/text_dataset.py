@@ -37,7 +37,7 @@ def get_dataset(dataset_name, metadata=False, synthetic_train_path=None, is_rag=
     elif dataset_name == 'commongen':
         if is_rag:
             commongen_data_path = f'datasets/commongen'
-            dataset = load_dataset("text", data_files={f'{split}': os.path.join(commongen_data_path, f'{split}_argumented_{top_k}.jsonl') for split in ['train', 'valid', 'test']})
+            dataset = load_dataset("text", data_files={f'{split}': os.path.join(commongen_data_path, f'{split}_augmented_top{top_k}.jsonl') for split in ['train', 'valid', 'test']})
             dataset = process_commongen_argumented_dataset(dataset)
         else:
             commongen_data_path = 'datasets/commongen'
@@ -46,7 +46,7 @@ def get_dataset(dataset_name, metadata=False, synthetic_train_path=None, is_rag=
     elif dataset_name == 'dimongen':
         if is_rag:
             dimongen_data_path = f'datasets/dimongen'
-            dataset = load_dataset("text", data_files={f'{split}': os.path.join(dimongen_data_path, f'{split}_argumented_{top_k}.jsonl') for split in ['train', 'valid', 'test']})
+            dataset = load_dataset("text", data_files={f'{split}': os.path.join(dimongen_data_path, f'{split}_augmented_top{top_k}.jsonl') for split in ['train', 'valid', 'test']})
             dataset = process_dimongen_argumented_dataset(dataset)
         else:
             dimongen_data_path = 'datasets/dimongen'
@@ -206,9 +206,11 @@ def get_dataloader(args, dataset, model_config, tokenizer, max_seq_len, mode='di
             if args.dataset_name in {'qqp', 'commongen', 'dimongen', 'wmt14-en-de', 'wmt14-de-en'}:
                 if is_rag:
                     obs = example['observations']
-                    assert type(obs) == list and len(obs) == top_k
-                    source = source + tokenizer.sep_token + (' ' + tokenizer.sep_token + ' ').join(obs)
-                    cond_inputs = context_tokenizer(source, padding="max_length", truncation=True, max_length=max_seq_len*4)
+                    assert type(obs) == list and len(obs[0]) == top_k
+                    
+                    rag_source = [s + tokenizer.sep_token + (' ' + tokenizer.sep_token + ' ').join(o) for s, o in zip(source, obs)]
+                    
+                    cond_inputs = context_tokenizer(rag_source, padding="max_length", truncation=True, max_length=max_seq_len*4)
                 else:    
                     cond_inputs = context_tokenizer(source, padding="max_length", truncation=True, max_length=max_seq_len)
             elif args.dataset_name in {'xsum',}:
