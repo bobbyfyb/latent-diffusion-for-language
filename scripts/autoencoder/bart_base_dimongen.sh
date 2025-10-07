@@ -9,6 +9,9 @@ python train_latent_model.py \
     --num_decoder_latents 32 \
     --eval_every 1000 \
     --num_layers 3 \
-    --wandb_name bart-dimongen-l2norm-latent-32-64 \
-    --l2_normalize_latent
+    --wandb_name bart-dimongen-rag-top3-l2norm-latent-32-64 \
+    --l2_normalize_latent \
+    --is_rag \
+    --top_k 3 \
+    --output_dir saved_latent_models/dimongen/bart-dimongen-rag-top3
 

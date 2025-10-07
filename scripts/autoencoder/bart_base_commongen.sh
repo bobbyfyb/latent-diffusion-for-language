@@ -9,6 +9,8 @@ python train_latent_model.py \
     --num_decoder_latents 32 \
     --eval_every 1000 \
     --num_layers 3 \
-    --wandb_name bart-commongen-l2norm-latent-32-64 \
-    --l2_normalize_latent
+    --wandb_name bart-commongen-rag-top5-l2norm-latent-32-64 \
+    --l2_normalize_latent \
+    --is_rag \
+    --top_k 5 \
 

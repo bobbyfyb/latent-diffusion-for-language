@@ -2,7 +2,7 @@ python train_text_diffusion.py \
 --dataset_name commongen \
 --learning_rate 2e-4 \
 --num_train_steps 250000 \
---train_batch_size 128 \
+--train_batch_size 256 \
 --tx_dim 768 \
 --tx_depth 12 \
 --objective pred_v \
@@ -11,11 +11,13 @@ python train_text_diffusion.py \
 --self_condition \
 --scale_shift --loss_type l2 \
 --train_schedule cosine \
---wandb_name roc_latent_v \
+--wandb_name commongen_rag_top5_training \
 --sampling_timesteps 250 \
---latent_model_path saved_latent_models/commongen/2025-08-08_16-06-05 \
+--latent_model_path saved_latent_models/commongen/2025-10-03_23-39-26 \
 --save_and_sample_every 5000 \
 --num_dense_connections 3 \
 --optimizer adamw \
---train_prob_self_cond 0.5
+--train_prob_self_cond 0.5 \
+--is_rag \
+--top_k 5 \
 # Need to update latent_model_path to the correct path
