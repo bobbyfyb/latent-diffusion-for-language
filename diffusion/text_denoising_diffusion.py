@@ -645,6 +645,10 @@ class Trainer(object):
 
         self.enc_dec_model = args.enc_dec_model
 
+        self.is_rag = is_rag
+        
+        self.top_k = top_k
+
         # Init Encoder-decoder model
         if 'bart' in args.enc_dec_model:
             self.bart_model = BartForConditionalGeneration.from_pretrained(args.enc_dec_model)
@@ -710,7 +714,7 @@ class Trainer(object):
             print(f'Using {self.num_samples} samples for evaluation')
         # Subsample train and val splits for computing language generation during runtime
         
-        self.train_val_dataloader = text_dataset.get_dataloader(args, dataset['train'].select(range(1000)), self.bart_model.config, self.tokenizer, self.max_seq_len, shuffle=False, context_tokenizer=self.context_tokenizer)
+        self.train_val_dataloader = text_dataset.get_dataloader(args, dataset['train'].select(range(1000)), self.bart_model.config, self.tokenizer, self.max_seq_len, shuffle=False, context_tokenizer=self.context_tokenizer, is_rag=is_rag, top_k=top_k)
         if args.resume_training:
             dataset['train'] = dataset['train'].shuffle()
         self.dataloader = text_dataset.get_dataloader(args, self.dataset['train'], self.bart_model.config, self.tokenizer, self.max_seq_len, context_tokenizer=self.context_tokenizer, is_rag=is_rag, top_k=top_k)
@@ -1008,7 +1012,20 @@ class Trainer(object):
                 pred_cand_list.append(texts_list)
 
                 ref_cand_list.append([self.tokenizer.decode(g, skip_special_tokens=True, clean_up_tokenization_spaces=True).strip() for g in data['input_ids']])
-                source_cand_list.append([self.context_tokenizer.decode(g, skip_special_tokens=True, clean_up_tokenization_spaces=True).strip() for g in data['cond_input_ids']])
+                                
+                if self.is_rag:
+                    decoded_source_cand_list = []
+                    for g in data["cond_input_ids"]:
+                        _decoded_g = self.context_tokenizer.decode(g, skip_special_tokens=False, clean_up_tokenization_spaces=True).strip()
+                        source_text = _decoded_g.split(self.context_tokenizer.sep_token)[0].strip()
+                        source_obs = _decoded_g.split(self.context_tokenizer.sep_token)[1:-1]
+                        decoded_source_cand_list.append([{
+                            "source_text": source_text,
+                            "source_obs": source_obs
+                        }])
+                    source_cand_list.append(decoded_source_cand_list)
+                else:
+                    source_cand_list.append([self.context_tokenizer.decode(g, skip_special_tokens=True, clean_up_tokenization_spaces=True).strip() for g in data['cond_input_ids']])
             assert len(pred_cand_list) == num_candidates
             assert len(ref_cand_list) == num_candidates
             assert len(source_cand_list) == num_candidates

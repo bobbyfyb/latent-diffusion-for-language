@@ -126,6 +126,11 @@ class Trainer(object):
             if args.output_dir is None:
                 args.output_dir = file_utils.get_output_dir(args)
             results_folder = args.output_dir
+            
+            if not os.path.exists(results_folder):
+                os.makedirs(results_folder, exist_ok=True)
+            print(f'saving to {results_folder}')
+            
             with open(os.path.join(args.output_dir, 'args.json'), 'w') as f:
                 json.dump(args.__dict__, f, indent=2)
             run = os.path.split(__file__)[-1].split(".")[0]

@@ -155,6 +155,8 @@ def main():
     parser.add_argument("--input_file", type=str, required=True, help="Path to the input JSON file")
     parser.add_argument("--dataset_name", type=str, default='commongen', help="Name of the dataset for evaluation metrics")
     parser.add_argument("--output_dir", type=str, default='./eval_res', help="Path to the output directory")
+    parser.add_argument("--is_rag", action='store_true', help="Whether the model is RAG")
+    parser.add_argument("--top_k", type=int, default=5, help="Top k retrieved passages if the model is RAG")
     parser.add_argument("--is_debug", action='store_true', help="Whether to run in debug mode")
     args = parser.parse_args()
 
@@ -168,24 +170,34 @@ def main():
     assert len(data['pred_texts']) == len(data['reference_texts']) == len(data['source_texts']), "Length of 'pred_texts', 'reference_texts', and 'source_texts' should be the same"
     
     print(f"Total samples: {len(data['pred_texts'])}")
-    
-    if os.path.exists(f"{args.output_dir}/{args.dataset_name}_aggregated_results.json"):
+
+    if os.path.exists(f"{args.output_dir}/{args.dataset_name}_is_rag_{args.is_rag}_top{args.top_k}_aggregated_results.json"):
         print("Aggregated results already exist. Skipping evaluation.")
-        aggregated_res_dict = json.load(open(f"{args.output_dir}/{args.dataset_name}_aggregated_results.json", 'r'))
-        
+        aggregated_res_dict = json.load(open(f"{args.output_dir}/{args.dataset_name}_is_rag_{args.is_rag}_top{args.top_k}_aggregated_results.json", 'r'))
+
     else:
         print("Aggregating results by source texts...")
         aggregated_res_dict = {}
         for pred, ref, src in zip(data['pred_texts'], data['reference_texts'], data['source_texts']):
-            if src in aggregated_res_dict:
-                aggregated_res_dict[src]['preds'].append(pred)
-                aggregated_res_dict[src]['refs'].append(ref)
+            
+            concept = src
+            
+            if type(src) == list:
+                src = src[0]
+            if type(src) == dict:
+                concept = src['source_text']
+                obs = src['source_obs']
+            
+            assert type(concept) == str, "Source text should be a string"
+            if concept in aggregated_res_dict:
+                aggregated_res_dict[concept]['preds'].append(pred)
+                aggregated_res_dict[concept]['refs'].append(ref)
             else:
-                aggregated_res_dict[src] = {'preds': [pred], 'refs': [ref]}    
+                aggregated_res_dict[concept] = {'preds': [pred], 'refs': [ref], 'obs': [obs]}
         
         print(f"Total unique sources: {len(aggregated_res_dict)}")
 
-        with open(f"{args.output_dir}/{args.dataset_name}_aggregated_results.json", 'w') as f:
+        with open(f"{args.output_dir}/{args.dataset_name}_is_rag_{args.is_rag}_top{args.top_k}_aggregated_results.json", 'w') as f:
             json.dump(aggregated_res_dict, f, indent=4)
 
     if args.is_debug:
@@ -202,8 +214,8 @@ def main():
         metric_dict = compute_metrics(preds, refs, listed_refs)
         aggregated_metric_dict = compute_aggregated_metrics(aggregated_res_dict)
         aggregated_metric_dict_nlgeval = compute_aggregated_metrics_nlgeval(aggregated_res_dict)
-        
-        with open(f"{args.output_dir}/{args.dataset_name}_metrics.json", 'w') as f:
+
+        with open(f"{args.output_dir}/{args.dataset_name}_is_rag_{args.is_rag}_top{args.top_k}_metrics.json", 'w') as f:
             json.dump({
                 "overall_metrics": metric_dict,
                 "aggregated_metrics": aggregated_metric_dict,
